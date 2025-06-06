@@ -15,12 +15,22 @@
 void handleClient(SOCKET clientSocket, const char *requestsFile);
 void handleHttpsClient(SSL *ssl, const char *requestsFile);
 
-void runServer(int port, const char *requestsFile)
+void runServer(int port, const char *requestsFile, std::atomic<bool> &running)
 {
   WSADATA wsaData;
-  WSAStartup(MAKEWORD(2, 2), &wsaData);
+  if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0)
+  {
+    std::cerr << "[SERVER] WSAStartup failed\n";
+    return;
+  }
 
   SOCKET listenSocket = socket(AF_INET, SOCK_STREAM, 0);
+  if (listenSocket == INVALID_SOCKET)
+  {
+    std::cerr << "[SERVER] Failed to create socket\n";
+    WSACleanup();
+    return;
+  }
 
   sockaddr_in serverAddr{};
   serverAddr.sin_family = AF_INET;
@@ -30,19 +40,35 @@ void runServer(int port, const char *requestsFile)
   bind(listenSocket, (sockaddr *)&serverAddr, sizeof(serverAddr));
   listen(listenSocket, SOMAXCONN);
 
-  std::cout << "HTTP server started on port " << port << std::endl;
+  std::cout << "[SERVER] HTTP server started on port " << port << std::endl;
 
-  while (true)
+  while (running)
   {
-    SOCKET clientSocket = accept(listenSocket, nullptr, nullptr);
-    std::thread(handleClient, clientSocket, requestsFile).detach();
+    fd_set readfds;
+    FD_ZERO(&readfds);
+    FD_SET(listenSocket, &readfds);
+
+    timeval timeout;
+    timeout.tv_sec = 1;
+    timeout.tv_usec = 0;
+
+    int activity = select(0, &readfds, nullptr, nullptr, &timeout);
+    if (activity > 0 && FD_ISSET(listenSocket, &readfds))
+    {
+      SOCKET clientSocket = accept(listenSocket, nullptr, nullptr);
+      if (clientSocket != INVALID_SOCKET)
+      {
+        std::thread(handleClient, clientSocket, requestsFile).detach();
+      }
+    }
   }
 
   closesocket(listenSocket);
   WSACleanup();
+  std::cout << "[SERVER] HTTP server stopped.\n";
 }
 
-void runHttpsServer(int port, const char *requestsFile, const char *certFile, const char *keyFile)
+void runHttpsServer(int port, const char *requestsFile, const char *certFile, const char *keyFile, std::atomic<bool> &running)
 {
   SSL_load_error_strings();
   OpenSSL_add_ssl_algorithms();
@@ -52,7 +78,6 @@ void runHttpsServer(int port, const char *requestsFile, const char *certFile, co
   SSL_CTX_use_PrivateKey_file(ctx, keyFile, SSL_FILETYPE_PEM);
 
   SOCKET listenSocket = socket(AF_INET, SOCK_STREAM, 0);
-
   sockaddr_in serverAddr{};
   serverAddr.sin_family = AF_INET;
   serverAddr.sin_port = htons(static_cast<u_short>(port));
@@ -61,32 +86,47 @@ void runHttpsServer(int port, const char *requestsFile, const char *certFile, co
   bind(listenSocket, (sockaddr *)&serverAddr, sizeof(serverAddr));
   listen(listenSocket, SOMAXCONN);
 
-  std::cout << "HTTPS server started on port " << port << std::endl;
+  std::cout << "[SERVER] HTTPS server started on port " << port << std::endl;
 
-  while (true)
+  while (running)
   {
-    SOCKET clientSocket = accept(listenSocket, nullptr, nullptr);
-    SSL *ssl = SSL_new(ctx);
-    SSL_set_fd(ssl, static_cast<int>(clientSocket));
-    SSL_accept(ssl);
-    std::thread(handleHttpsClient, ssl, requestsFile).detach();
+    fd_set readfds;
+    FD_ZERO(&readfds);
+    FD_SET(listenSocket, &readfds);
+
+    timeval timeout;
+    timeout.tv_sec = 1;
+    timeout.tv_usec = 0;
+
+    int activity = select(0, &readfds, nullptr, nullptr, &timeout);
+    if (activity > 0 && FD_ISSET(listenSocket, &readfds))
+    {
+      SOCKET clientSocket = accept(listenSocket, nullptr, nullptr);
+      if (clientSocket != INVALID_SOCKET)
+      {
+        SSL *ssl = SSL_new(ctx);
+        SSL_set_fd(ssl, static_cast<int>(clientSocket));
+        if (SSL_accept(ssl) <= 0)
+        {
+          SSL_free(ssl);
+          closesocket(clientSocket);
+        }
+        else
+        {
+          std::thread(handleHttpsClient, ssl, requestsFile).detach();
+        }
+      }
+    }
   }
 
   closesocket(listenSocket);
   SSL_CTX_free(ctx);
   EVP_cleanup();
+  std::cout << "[SERVER] HTTPS server stopped.\n";
 }
 
 void handleClient(SOCKET clientSocket, const char *requestsFile)
 {
-  sockaddr_in clientAddr{};
-  int addrSize = sizeof(clientAddr);
-  getpeername(clientSocket, (sockaddr *)&clientAddr, &addrSize);
-
-  char ipStr[INET_ADDRSTRLEN] = {};
-  inet_ntop(AF_INET, &clientAddr.sin_addr, ipStr, sizeof(ipStr));
-  // std::cout << "Request from " << ipStr << ":" << ntohs(clientAddr.sin_port) << std::endl;
-
   char buffer[4096]{};
   int bytes = recv(clientSocket, buffer, static_cast<int>(sizeof(buffer)), 0);
   if (bytes <= 0)
@@ -98,6 +138,15 @@ void handleClient(SOCKET clientSocket, const char *requestsFile)
   std::string request(buffer, bytes);
   saveRequest(request, clientSocket, requestsFile);
 
+  sockaddr_in clientAddr{};
+  int addrSize = sizeof(clientAddr);
+  getpeername(clientSocket, (sockaddr *)&clientAddr, &addrSize);
+  char ipStr[INET_ADDRSTRLEN] = {};
+  inet_ntop(AF_INET, &clientAddr.sin_addr, ipStr, sizeof(ipStr));
+
+  std::cout << "[CLIENT] " << ipStr << "\n"
+            << request << "\n";
+
   std::string html = loadStaticHTML("static/index.html");
   std::string response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n" + html;
   send(clientSocket, response.c_str(), static_cast<int>(response.size()), 0);
@@ -107,13 +156,6 @@ void handleClient(SOCKET clientSocket, const char *requestsFile)
 void handleHttpsClient(SSL *ssl, const char *requestsFile)
 {
   SOCKET clientSocket = static_cast<SOCKET>(SSL_get_fd(ssl));
-  sockaddr_in clientAddr{};
-  int addrSize = sizeof(clientAddr);
-  getpeername(clientSocket, (sockaddr *)&clientAddr, &addrSize);
-
-  char ipStr[INET_ADDRSTRLEN] = {};
-  inet_ntop(AF_INET, &clientAddr.sin_addr, ipStr, sizeof(ipStr));
-  // std::cout << "Request from " << ipStr << ":" << ntohs(clientAddr.sin_port) << std::endl;
 
   char buffer[4096]{};
   int bytes = SSL_read(ssl, buffer, static_cast<int>(sizeof(buffer)));
@@ -126,6 +168,15 @@ void handleHttpsClient(SSL *ssl, const char *requestsFile)
 
   std::string request(buffer, bytes);
   saveRequest(request, clientSocket, requestsFile);
+
+  sockaddr_in clientAddr{};
+  int addrSize = sizeof(clientAddr);
+  getpeername(clientSocket, (sockaddr *)&clientAddr, &addrSize);
+  char ipStr[INET_ADDRSTRLEN] = {};
+  inet_ntop(AF_INET, &clientAddr.sin_addr, ipStr, sizeof(ipStr));
+
+  std::cout << "[CLIENT] " << ipStr << "\n"
+            << request << "\n";
 
   std::string html = loadStaticHTML("static/index.html");
   std::string response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n" + html;

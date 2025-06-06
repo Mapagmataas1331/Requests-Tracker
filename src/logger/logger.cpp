@@ -3,7 +3,9 @@
 #include "../utils/utils.h"
 #include <json.hpp>
 #include <fstream>
+#include <sstream>
 #include <mutex>
+#include <filesystem>
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -39,7 +41,7 @@ void saveRequest(const std::string &request, SOCKET socket, const char *requests
   }
   catch (const std::exception &e)
   {
-    std::cerr << "Failed to create directories: " << e.what() << "\n";
+    std::cerr << "[LOGGER] Failed to create directories: " << e.what() << "\n";
     return;
   }
 
@@ -63,39 +65,49 @@ void saveRequest(const std::string &request, SOCKET socket, const char *requests
   std::lock_guard<std::mutex> lock(fileMutex);
 
   json data;
-  std::ifstream inFile(requestsFile);
-  if (inFile.is_open())
+
+  try
   {
-    try
+    std::ifstream inFile(requestsFile);
+    if (inFile)
     {
-      inFile >> data;
-      if (!data.is_object())
+      std::stringstream buffer;
+      buffer << inFile.rdbuf();
+      std::string content = buffer.str();
+
+      if (!content.empty())
       {
+        data = json::parse(content);
+      }
+      else
+      {
+        std::cerr << "[LOGGER] Warning: " << requestsFile << " is empty. Initializing...\n";
         data = json::object();
       }
     }
-    catch (...)
+    else
     {
+      std::cerr << "[LOGGER] File " << requestsFile << " does not exist. Initializing...\n";
       data = json::object();
     }
-    inFile.close();
   }
-  else
+  catch (const std::exception &e)
   {
+    std::cerr << "[LOGGER] Error reading/parsing " << requestsFile << ": " << e.what() << "\n";
     data = json::object();
   }
 
-  if (!data.contains("senders") || !data["senders"].is_array())
+  if (!data.contains("senders"))
     data["senders"] = json::array();
-  if (!data.contains("routes") || !data["routes"].is_array())
+  if (!data.contains("routes"))
     data["routes"] = json::array();
-  if (!data.contains("methods") || !data["methods"].is_array())
+  if (!data.contains("methods"))
     data["methods"] = json::array();
-  if (!data.contains("protocols") || !data["protocols"].is_array())
+  if (!data.contains("protocols"))
     data["protocols"] = json::array();
-  if (!data.contains("user_agents") || !data["user_agents"].is_array())
+  if (!data.contains("user_agents"))
     data["user_agents"] = json::array();
-  if (!data.contains("requests") || !data["requests"].is_array())
+  if (!data.contains("requests"))
     data["requests"] = json::array();
 
   int senderIndex = getOrAddIndex(data["senders"], ipStr);
@@ -111,14 +123,23 @@ void saveRequest(const std::string &request, SOCKET socket, const char *requests
                               protocolIndex,
                               userAgentIndex});
 
-  std::ofstream outFile(requestsFile, std::ios::trunc);
-  if (outFile.is_open())
+  try
   {
-    outFile << data.dump(4);
-    outFile.close();
+    std::string tempFile = std::string(requestsFile) + ".tmp";
+    std::ofstream outFile(tempFile, std::ios::trunc);
+    if (outFile.is_open())
+    {
+      outFile << data.dump(2);
+      outFile.close();
+      std::filesystem::rename(tempFile, requestsFile);
+    }
+    else
+    {
+      std::cerr << "[LOGGER] Error: Unable to write to temporary file " << tempFile << "\n";
+    }
   }
-  else
+  catch (const std::exception &e)
   {
-    std::cerr << "Error: Unable to write to " << requestsFile << std::endl;
+    std::cerr << "[LOGGER] Failed to save JSON to file: " << e.what() << "\n";
   }
 }

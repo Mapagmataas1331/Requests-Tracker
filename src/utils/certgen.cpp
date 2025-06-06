@@ -16,7 +16,7 @@ void ensureCertificateExists(const std::string &certPath, const std::string &key
 {
   if (std::filesystem::exists(certPath) && std::filesystem::exists(keyPath))
   {
-    std::cout << "Files already exist, skipping generation\n";
+    std::cout << "[CERTGEN] Files already exist, skipping generation\n";
     return;
   }
 
@@ -36,7 +36,7 @@ void ensureCertificateExists(const std::string &certPath, const std::string &key
   }
   catch (const std::exception &e)
   {
-    std::cerr << "Failed to create directories: " << e.what() << "\n";
+    std::cerr << "[CERTGEN] Failed to create directories: " << e.what() << "\n";
     return;
   }
 
@@ -46,14 +46,14 @@ void ensureCertificateExists(const std::string &certPath, const std::string &key
   EVP_PKEY_CTX *pctx = EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, nullptr);
   if (!pctx)
   {
-    std::cerr << "EVP_PKEY_CTX_new_id failed\n";
+    std::cerr << "[CERTGEN] EVP_PKEY_CTX_new_id failed\n";
     ERR_print_errors_fp(stderr);
     return;
   }
 
   if (EVP_PKEY_keygen_init(pctx) <= 0)
   {
-    std::cerr << "EVP_PKEY_keygen_init failed\n";
+    std::cerr << "[CERTGEN] EVP_PKEY_keygen_init failed\n";
     ERR_print_errors_fp(stderr);
     EVP_PKEY_CTX_free(pctx);
     return;
@@ -61,7 +61,7 @@ void ensureCertificateExists(const std::string &certPath, const std::string &key
 
   if (EVP_PKEY_CTX_set_rsa_keygen_bits(pctx, 2048) <= 0)
   {
-    std::cerr << "EVP_PKEY_CTX_set_rsa_keygen_bits failed\n";
+    std::cerr << "[CERTGEN] EVP_PKEY_CTX_set_rsa_keygen_bits failed\n";
     ERR_print_errors_fp(stderr);
     EVP_PKEY_CTX_free(pctx);
     return;
@@ -69,7 +69,7 @@ void ensureCertificateExists(const std::string &certPath, const std::string &key
 
   if (EVP_PKEY_keygen(pctx, &pkey) <= 0)
   {
-    std::cerr << "EVP_PKEY_keygen failed\n";
+    std::cerr << "[CERTGEN] EVP_PKEY_keygen failed\n";
     ERR_print_errors_fp(stderr);
     EVP_PKEY_CTX_free(pctx);
     return;
@@ -79,7 +79,7 @@ void ensureCertificateExists(const std::string &certPath, const std::string &key
   x509 = X509_new();
   if (!x509)
   {
-    std::cerr << "X509_new failed\n";
+    std::cerr << "[CERTGEN] X509_new failed\n";
     ERR_print_errors_fp(stderr);
     EVP_PKEY_free(pkey);
     return;
@@ -98,7 +98,7 @@ void ensureCertificateExists(const std::string &certPath, const std::string &key
 
   if (!X509_sign(x509, pkey, EVP_sha256()))
   {
-    std::cerr << "X509_sign failed\n";
+    std::cerr << "[CERTGEN] X509_sign failed\n";
     ERR_print_errors_fp(stderr);
     X509_free(x509);
     EVP_PKEY_free(pkey);
@@ -108,7 +108,7 @@ void ensureCertificateExists(const std::string &certPath, const std::string &key
   FILE *pkey_file = nullptr;
   if (fopen_s(&pkey_file, keyPath.c_str(), "wb") != 0 || !pkey_file)
   {
-    std::cerr << "Failed to open key file for writing: " << keyPath << "\n";
+    std::cerr << "[CERTGEN] Failed to open key file for writing: " << keyPath << "\n";
     ERR_print_errors_fp(stderr);
     X509_free(x509);
     EVP_PKEY_free(pkey);
@@ -116,7 +116,7 @@ void ensureCertificateExists(const std::string &certPath, const std::string &key
   }
   if (!PEM_write_PrivateKey(pkey_file, pkey, nullptr, nullptr, 0, nullptr, nullptr))
   {
-    std::cerr << "PEM_write_PrivateKey failed\n";
+    std::cerr << "[CERTGEN] PEM_write_PrivateKey failed\n";
     ERR_print_errors_fp(stderr);
     fclose(pkey_file);
     X509_free(x509);
@@ -128,7 +128,7 @@ void ensureCertificateExists(const std::string &certPath, const std::string &key
   FILE *cert_file = nullptr;
   if (fopen_s(&cert_file, certPath.c_str(), "wb") != 0 || !cert_file)
   {
-    std::cerr << "Failed to open cert file for writing: " << certPath << "\n";
+    std::cerr << "[CERTGEN] Failed to open cert file for writing: " << certPath << "\n";
     ERR_print_errors_fp(stderr);
     X509_free(x509);
     EVP_PKEY_free(pkey);
@@ -136,7 +136,7 @@ void ensureCertificateExists(const std::string &certPath, const std::string &key
   }
   if (!PEM_write_X509(cert_file, x509))
   {
-    std::cerr << "PEM_write_X509 failed\n";
+    std::cerr << "[CERTGEN] PEM_write_X509 failed\n";
     ERR_print_errors_fp(stderr);
     fclose(cert_file);
     X509_free(x509);
@@ -148,5 +148,5 @@ void ensureCertificateExists(const std::string &certPath, const std::string &key
   X509_free(x509);
   EVP_PKEY_free(pkey);
 
-  std::cout << "Certificate and key generated successfully.\n";
+  std::cout << "[CERTGEN] Certificate and key generated successfully.\n";
 }

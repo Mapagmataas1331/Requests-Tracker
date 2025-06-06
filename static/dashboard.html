@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Requests Dashboard</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f9f9f9;
+      margin: 0;
+      padding: 20px;
+    }
+
+    h1 {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+
+    .controls {
+      margin-bottom: 10px;
+      display: flex;
+      justify-content: space-between;
+      flex-wrap: wrap;
+    }
+
+    input,
+    select {
+      padding: 5px 10px;
+      margin: 5px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: white;
+    }
+
+    th,
+    td {
+      padding: 8px 12px;
+      border: 1px solid #ccc;
+      text-align: left;
+    }
+
+    th {
+      cursor: pointer;
+      background-color: #f0f0f0;
+    }
+
+    th.sort-asc::after {
+      content: " ▲";
+    }
+
+    th.sort-desc::after {
+      content: " ▼";
+    }
+  </style>
+</head>
+
+<body>
+  <h1>Requests Dashboard</h1>
+  <div class="controls">
+    <input type="text" id="search" placeholder="Search..." />
+    <select id="routeFilter">
+      <option value="">All Routes</option>
+    </select>
+    <select id="senderFilter">
+      <option value="">All Senders</option>
+    </select>
+  </div>
+  <table id="requestsTable">
+    <thead>
+      <tr>
+        <th data-key="timestamp">Timestamp</th>
+        <th data-key="method">Method</th>
+        <th data-key="route">Route</th>
+        <th data-key="protocol">Protocol</th>
+        <th data-key="sender">Sender</th>
+        <th data-key="user_agent">User Agent</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <script>
+    const dataUrl = './requests.json';
+    let rawData = [];
+    let currentSort = { key: '', order: 'asc' };
+
+    async function loadData() {
+      const response = await fetch(dataUrl);
+      const json = await response.json();
+
+      const { requests, methods, routes, protocols, senders, user_agents } = json;
+
+      rawData = requests.map(row => ({
+        timestamp: row[0],
+        route: routes[row[1]],
+        sender: senders[row[2]],
+        method: methods[row[3]],
+        protocol: protocols[row[4]],
+        user_agent: user_agents[row[5]]
+      }));
+
+      populateFilters(routes, senders);
+      renderTable(rawData);
+    }
+
+    function populateFilters(routes, senders) {
+      const routeFilter = document.getElementById('routeFilter');
+      routes.forEach(route => {
+        const opt = document.createElement('option');
+        opt.value = route;
+        opt.textContent = route;
+        routeFilter.appendChild(opt);
+      });
+
+      const senderFilter = document.getElementById('senderFilter');
+      senders.forEach(sender => {
+        const opt = document.createElement('option');
+        opt.value = sender;
+        opt.textContent = sender;
+        senderFilter.appendChild(opt);
+      });
+    }
+
+    function renderTable(data) {
+      const tbody = document.querySelector('#requestsTable tbody');
+      tbody.innerHTML = '';
+
+      data.forEach(row => {
+        const tr = document.createElement('tr');
+        for (let key in row) {
+          const td = document.createElement('td');
+          td.textContent = row[key];
+          tr.appendChild(td);
+        }
+        tbody.appendChild(tr);
+      });
+    }
+
+    function filterAndRender() {
+      const searchTerm = document.getElementById('search').value.toLowerCase();
+      const routeFilter = document.getElementById('routeFilter').value;
+      const senderFilter = document.getElementById('senderFilter').value;
+
+      let filtered = rawData.filter(row => {
+        const matchesSearch = Object.values(row).some(val =>
+          val.toLowerCase().includes(searchTerm)
+        );
+        const matchesRoute = routeFilter ? row.route === routeFilter : true;
+        const matchesSender = senderFilter ? row.sender === senderFilter : true;
+        return matchesSearch && matchesRoute && matchesSender;
+      });
+
+      if (currentSort.key) {
+        filtered.sort((a, b) => {
+          let valA = a[currentSort.key];
+          let valB = b[currentSort.key];
+          return currentSort.order === 'asc'
+            ? valA.localeCompare(valB)
+            : valB.localeCompare(valA);
+        });
+      }
+
+      renderTable(filtered);
+    }
+
+    document.getElementById('search').addEventListener('input', filterAndRender);
+    document.getElementById('routeFilter').addEventListener('change', filterAndRender);
+    document.getElementById('senderFilter').addEventListener('change', filterAndRender);
+
+    document.querySelectorAll('#requestsTable th').forEach(th => {
+      th.addEventListener('click', () => {
+        const key = th.getAttribute('data-key');
+        const order = currentSort.key === key && currentSort.order === 'asc' ? 'desc' : 'asc';
+        currentSort = { key, order };
+
+        document.querySelectorAll('#requestsTable th').forEach(th => th.classList.remove('sort-asc', 'sort-desc'));
+        th.classList.add(order === 'asc' ? 'sort-asc' : 'sort-desc');
+
+        filterAndRender();
+      });
+    });
+
+    loadData();
+  </script>
+</body>
+
+</html>

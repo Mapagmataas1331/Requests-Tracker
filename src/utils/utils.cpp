@@ -1,17 +1,26 @@
 #include "utils.h"
+#include <algorithm>
 #include <sstream>
 #include <fstream>
 #include <ctime>
 
 std::string extractMethod(const std::string &request)
 {
-  return request.substr(0, request.find(' '));
+  size_t pos = request.find(' ');
+  if (pos == std::string::npos)
+    return "";
+  return request.substr(0, pos);
 }
 
 std::string extractPath(const std::string &request)
 {
-  size_t start = request.find(' ') + 1;
-  return request.substr(start, request.find(' ', start) - start);
+  size_t start = request.find(' ');
+  if (start == std::string::npos)
+    return "";
+  size_t end = request.find(' ', start + 1);
+  if (end == std::string::npos)
+    return "";
+  return request.substr(start + 1, end - (start + 1));
 }
 
 std::string extractProtocol(const std::string &request)
@@ -19,18 +28,33 @@ std::string extractProtocol(const std::string &request)
   std::istringstream stream(request);
   std::string method, path, protocol;
   stream >> method >> path >> protocol;
-  return protocol;
+  return protocol.empty() ? "" : protocol;
 }
 
 std::string extractHeaderValue(const std::string &request, const std::string &header)
 {
   std::istringstream stream(request);
   std::string line;
+  std::string headerLower = header + ":";
+  std::transform(headerLower.begin(), headerLower.end(), headerLower.begin(), [](unsigned char c)
+                 { return static_cast<char>(std::tolower(c)); });
+
   while (std::getline(stream, line))
   {
-    if (line.find(header) != std::string::npos)
+    std::string lineLower = line;
+    std::transform(lineLower.begin(), lineLower.end(), lineLower.begin(), [](unsigned char c)
+                   { return static_cast<char>(std::tolower(c)); });
+
+    if (lineLower.find(headerLower) == 0)
     {
-      return line.substr(line.find(':') + 2); // Skip colon and space
+      size_t pos = line.find(':');
+      if (pos != std::string::npos)
+      {
+        size_t start = pos + 1;
+        while (start < line.size() && line[start] == ' ')
+          start++;
+        return line.substr(start);
+      }
     }
   }
   return "";
